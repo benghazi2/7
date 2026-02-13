@@ -1,31 +1,44 @@
-# database.py - نسخة آمنة لـ Streamlit Cloud
+# database.py - تم إصلاح الاتصال بـ Firebase
 import firebase_admin
 from firebase_admin import credentials, db
-import json
-import os
+import streamlit as st
+from datetime import datetime
 
-# جلب الـ credentials من Streamlit Secrets
-if "FIREBASE_CREDENTIALS" in os.environ:
-    firebase_credentials = json.loads(os.environ["FIREBASE_CREDENTIALS"])
-else:
-    import streamlit as st
-    firebase_credentials = st.secrets["FIREBASE_CREDENTIALS"]
-
-# تهيئة Firebase
+# --- بداية التعديل والإصلاح ---
+# التحقق من أن Firebase لم يتم تشغيله مسبقاً لتجنب الأخطاء عند تحديث الصفحة
 if not firebase_admin._apps:
-    cred = credentials.Certificate(firebase_credentials)
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://my-goodbarber-projet-261703-default-rtdb.firebaseio.com/'
-    })
+    try:
+        # جلب البيانات من Streamlit Secrets وتحويلها إلى قاموس (Dictionary)
+        # ملاحظة: يجب أن يكون لديك قسم [FIREBASE_CREDENTIALS] في إعدادات الـ Secrets
+        firebase_creds = dict(st.secrets["FIREBASE_CREDENTIALS"])
+        
+        # هذا السطر هو أهم إصلاح: يقوم بتصحيح تنسيق المفتاح الخاص
+        if "private_key" in firebase_creds:
+            firebase_creds["private_key"] = firebase_creds["private_key"].replace("\\n", "\n")
 
-ref = db.reference('/')
+        # إنشاء الاتصال
+        cred = credentials.Certificate(firebase_creds)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://my-goodbarber-projet-261703-default-rtdb.firebaseio.com/'
+        })
+    except Exception as e:
+        st.error(f"حدث خطأ في الاتصال بقاعدة البيانات: {e}")
 
-# باقي الدوال زي ما هي
+# تحديد مرجع قاعدة البيانات
+try:
+    ref = db.reference('/')
+except:
+    ref = None
+# --- نهاية التعديل والإصلاح ---
+
+# دالة تهيئة وهمية (لأننا قمنا بالتهيئة بالأعلى بالفعل)
 def init_db():
     pass
 
+# دالة حفظ التوصيات (كما هي في ملفك الأصلي)
 def save_recommendation(symbol, recommendation, score):
-    from datetime import datetime
+    if ref is None: return # حماية في حال فشل الاتصال
+    
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     data = {
         "symbol": symbol,
@@ -38,11 +51,16 @@ def save_recommendation(symbol, recommendation, score):
     }
     try:
         ref.child("recommendations").push(data)
-        ref.child("active_trades").child(symbol.replace("=X", "")).set(data)
-    except:
-        pass
+        # تنظيف الرمز من =X لتسهيل القراءة
+        clean_symbol = symbol.replace("=X", "")
+        ref.child("active_trades").child(clean_symbol).set(data)
+    except Exception as e:
+        print(f"Error saving data: {e}")
 
+# دالة جلب الصفقات النشطة (كما هي في ملفك الأصلي)
 def get_active_trades():
+    if ref is None: return [] # حماية في حال فشل الاتصال
+    
     try:
         data = ref.child("active_trades").get()
         return list(data.values()) if data else []
