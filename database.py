@@ -1,68 +1,69 @@
-# database.py - تم إصلاح الاتصال بـ Firebase
+# database.py - تم التعديل لحفظ اتجاه الصفقة
 import firebase_admin
 from firebase_admin import credentials, db
 import streamlit as st
+import json
 from datetime import datetime
 
-# --- بداية التعديل والإصلاح ---
-# التحقق من أن Firebase لم يتم تشغيله مسبقاً لتجنب الأخطاء عند تحديث الصفحة
-if not firebase_admin._apps:
+ref = None
+
+def init_db():
+    global ref
+    if firebase_admin._apps:
+        try:
+            ref = db.reference('/')
+        except:
+            pass
+        return
+
     try:
-        # جلب البيانات من Streamlit Secrets وتحويلها إلى قاموس (Dictionary)
-        # ملاحظة: يجب أن يكون لديك قسم [FIREBASE_CREDENTIALS] في إعدادات الـ Secrets
-        firebase_creds = dict(st.secrets["FIREBASE_CREDENTIALS"])
-        
-        # هذا السطر هو أهم إصلاح: يقوم بتصحيح تنسيق المفتاح الخاص
+        raw_creds = st.secrets["FIREBASE_CREDENTIALS"]
+        if isinstance(raw_creds, str):
+            firebase_creds = json.loads(raw_creds)
+        else:
+            firebase_creds = dict(raw_creds)
+
         if "private_key" in firebase_creds:
             firebase_creds["private_key"] = firebase_creds["private_key"].replace("\\n", "\n")
 
-        # إنشاء الاتصال
         cred = credentials.Certificate(firebase_creds)
         firebase_admin.initialize_app(cred, {
             'databaseURL': 'https://my-goodbarber-projet-261703-default-rtdb.firebaseio.com/'
         })
+        ref = db.reference('/')
     except Exception as e:
-        st.error(f"حدث خطأ في الاتصال بقاعدة البيانات: {e}")
+        print(f"Firebase Connection Error: {e}")
+        ref = None
 
-# تحديد مرجع قاعدة البيانات
-try:
-    ref = db.reference('/')
-except:
-    ref = None
-# --- نهاية التعديل والإصلاح ---
+init_db()
 
-# دالة تهيئة وهمية (لأننا قمنا بالتهيئة بالأعلى بالفعل)
-def init_db():
-    pass
-
-# دالة حفظ التوصيات (كما هي في ملفك الأصلي)
-def save_recommendation(symbol, recommendation, score):
-    if ref is None: return # حماية في حال فشل الاتصال
-    
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    data = {
-        "symbol": symbol,
-        "recommendation": recommendation,
-        "score": score,
-        "time": timestamp,
-        "progress": 0,
-        "pnl": 0,
-        "status": "open"
-    }
+# --- التعديل هنا: إضافة parameter جديد يسمى direction ---
+def save_recommendation(symbol, recommendation, score, direction):
+    if ref is None: return
     try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data = {
+            "symbol": symbol,
+            "recommendation": recommendation,
+            "score": score,
+            "direction": direction,  # تم إضافة هذا الحقل
+            "time": timestamp,
+            "progress": 0,
+            "pnl": 0,
+            "status": "open"
+        }
         ref.child("recommendations").push(data)
-        # تنظيف الرمز من =X لتسهيل القراءة
-        clean_symbol = symbol.replace("=X", "")
+        clean_symbol = symbol.replace("=X", "").replace(".", "_")
         ref.child("active_trades").child(clean_symbol).set(data)
     except Exception as e:
-        print(f"Error saving data: {e}")
+        print(f"Error saving: {e}")
 
-# دالة جلب الصفقات النشطة (كما هي في ملفك الأصلي)
 def get_active_trades():
-    if ref is None: return [] # حماية في حال فشل الاتصال
-    
+    if ref is None: return []
     try:
         data = ref.child("active_trades").get()
-        return list(data.values()) if data else []
+        if not data: return []
+        # التأكد من أن البيانات قائمة
+        return list(data.values())
     except:
         return []
